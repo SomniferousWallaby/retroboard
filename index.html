@@ -189,8 +189,11 @@
         async function loadUserProfile(user) {
             const userProfilePath = `/artifacts/${appId}/users/${user.uid}/profile/data`;
             const profileRef = doc(db, userProfilePath);
+            const adminRef = doc(db, `admins/${user.uid}`);
+            
             try {
-                const profileSnap = await getDoc(profileRef);
+                const [profileSnap, adminSnap] = await Promise.all([getDoc(profileRef), getDoc(adminRef)]);
+
                 if (profileSnap.exists()) {
                     currentUserProfile = profileSnap.data();
                 } else {
@@ -201,9 +204,13 @@
                     await setDoc(profileRef, defaultProfile);
                     currentUserProfile = defaultProfile;
                 }
+                
+                // Check for admin status in the 'admins' collection and verify the 'isAdmin' field
+                currentUserProfile.isAdmin = adminSnap.exists() && adminSnap.data().isAdmin === true;
+
             } catch (error) {
                 console.error("Error loading user profile:", error);
-                currentUserProfile = { displayName: 'Anonymous' };
+                currentUserProfile = { displayName: 'Anonymous', isAdmin: false };
             }
         }
 
@@ -225,7 +232,7 @@
                 authContainer.innerHTML = `
                     <div class="flex items-center space-x-4">
                         <img src="${currentUser.photoURL}" alt="User Avatar" class="w-10 h-10 rounded-full">
-                        <span class="font-medium text-gray-700">${currentUserProfile.displayName}</span>
+                        <span class="font-medium text-gray-700">${currentUserProfile.displayName} ${currentUserProfile.isAdmin ? '(Admin)' : ''}</span>
                         <button id="sign-out-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md">Sign Out</button>
                     </div>
                 `;
@@ -290,7 +297,8 @@
                     `;
                     boardEl.appendChild(linkEl);
 
-                    if (currentUser && currentUser.uid === board.creatorId) {
+                    // Show delete button if user is the creator OR if the user is an admin
+                    if (currentUser && (currentUser.uid === board.creatorId || currentUserProfile?.isAdmin)) {
                         const deleteButton = document.createElement('button');
                         deleteButton.className = 'absolute top-2 right-2 p-1 text-gray-400 hover:text-red-600 rounded-full';
                         deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>`;
@@ -491,7 +499,7 @@
                     cardEl.querySelector('.vote-btn').onclick = () => toggleVote(currentBoardId, card.id);
 
                     const deleteButton = cardEl.querySelector('.delete-btn');
-                    if (currentUser && currentUser.uid === card.userId) {
+                    if (currentUser && (currentUser.uid === card.userId || currentUserProfile?.isAdmin)) {
                         deleteButton.onclick = () => deleteCard(currentBoardId, card.id);
                     } else {
                         deleteButton.style.display = 'none';
