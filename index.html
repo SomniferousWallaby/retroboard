@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agile Retrospective App</title>
+    <title>Agile Retrospectives</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -30,6 +30,14 @@
         }
         .vote-btn.voted {
             color: #3b82f6; /* blue-500 */
+        }
+        .card-text-blurred {
+            filter: blur(5px);
+            user-select: none;
+        }
+        .card.completed p {
+            text-decoration: line-through;
+            color: #6b7280;
         }
         /* Page transition styles */
         .page {
@@ -66,7 +74,7 @@
     <div id="confirmation-modal" class="modal-overlay hidden">
         <div class="modal-box text-center">
             <h3 class="text-xl font-bold mb-4">Are you sure?</h3>
-            <p class="text-gray-600 mb-6">This will permanently delete the board and all of its cards. This action cannot be undone.</p>
+            <p id="modal-text" class="text-gray-600 mb-6"></p>
             <div class="flex justify-center space-x-4">
                 <button id="confirm-delete-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-md">Delete</button>
                 <button id="cancel-delete-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-md">Cancel</button>
@@ -76,8 +84,12 @@
 
     <div class="container mx-auto p-4 md:p-8">
         <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-900">Agile Retrospective App</h1>
-            <div id="auth-container" class="mt-6 flex flex-col items-center justify-center space-y-2 min-h-[40px]">
+            <h1 class="text-4xl font-bold text-gray-900">Agile Retrospectives</h1>
+            <div class="mt-2">
+                <a href="#" id="home-link" class="text-blue-600 hover:underline mx-2">Home</a>
+                <a href="#all-actions" id="all-actions-link" class="text-blue-600 hover:underline mx-2">All Action Items</a>
+            </div>
+            <div id="auth-container" class="mt-4 flex flex-col items-center justify-center space-y-2 min-h-[40px]">
                 <!-- Auth UI rendered here -->
             </div>
         </header>
@@ -101,41 +113,76 @@
 
         <!-- Board Page -->
         <div id="board-page" class="page">
-            <div class="mb-6">
+             <div class="mb-6">
                 <a href="#" class="text-blue-600 hover:underline">&larr; Back to Home</a>
-                <h2 id="board-title" class="text-3xl font-bold text-center -mt-6"></h2>
+            </div>
+            <div class="text-center mb-6 -mt-6">
+                <h2 id="board-title" class="text-3xl font-bold"></h2>
+                <div id="board-actions" class="mt-4"></div>
             </div>
             <main id="retro-board" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <!-- Columns will be dynamically generated here -->
             </main>
+        </div>
+
+        <!-- All Action Items Page -->
+        <div id="all-actions-page" class="page">
+            <div class="max-w-4xl mx-auto bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-3xl font-bold mb-6 text-center">All Action Items</h2>
+                <div id="incomplete-actions-list" class="space-y-4">
+                    <!-- Incomplete action items will be listed here -->
+                </div>
+                <div id="completed-actions-section" class="mt-8 pt-6 border-t" style="display: none;">
+                    <button id="toggle-completed-btn" class="text-lg font-bold text-gray-600 flex items-center w-full text-left">
+                        <span class="flex-grow">Completed Items</span>
+                        <svg id="completed-arrow" class="w-5 h-5 transform transition-transform" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <div id="completed-actions-list" class="space-y-4 mt-4 hidden">
+                        <!-- Completed action items will be listed here -->
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, serverTimestamp, query, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, serverTimestamp, query, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, getDocs, collectionGroup, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Global App State ---
-        let app, auth, db, provider; // Firebase services will be initialized in main()
-        const appId = 'retro-board-app'; // A unique ID for your app's data
+        let app, auth, db, provider;
+        const appId = 'retro-board-app';
         let currentUser = null;
         let currentUserProfile = null;
         let currentBoardId = null;
+        let currentBoardData = null;
+        let currentCardsData = [];
         let cardsListenerUnsubscribe = null;
-        let boardsListenerUnsubscribe = null;
+        let boardListenerUnsubscribe = null;
+        let allActionsListenerUnsubscribe = null;
 
         // --- DOM Elements ---
         const authContainer = document.getElementById('auth-container');
         const homePage = document.getElementById('home-page');
         const boardPage = document.getElementById('board-page');
+        const allActionsPage = document.getElementById('all-actions-page');
         const createBoardSection = document.getElementById('create-board-section');
         const newBoardNameInput = document.getElementById('new-board-name');
         const createBoardBtn = document.getElementById('create-board-btn');
         const boardsList = document.getElementById('boards-list');
         const retroBoardContainer = document.getElementById('retro-board');
         const boardTitle = document.getElementById('board-title');
+        const boardActionsContainer = document.getElementById('board-actions');
+        const incompleteActionsList = document.getElementById('incomplete-actions-list');
+        const completedActionsSection = document.getElementById('completed-actions-section');
+        const completedActionsList = document.getElementById('completed-actions-list');
+        const toggleCompletedBtn = document.getElementById('toggle-completed-btn');
+        const completedArrow = document.getElementById('completed-arrow');
         const confirmationModal = document.getElementById('confirmation-modal');
+        const modalText = document.getElementById('modal-text');
         const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
         const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
 
@@ -150,13 +197,20 @@
         // --- Routing ---
         function handleRouting() {
             if (cardsListenerUnsubscribe) cardsListenerUnsubscribe();
-            if (boardsListenerUnsubscribe) boardsListenerUnsubscribe();
+            if (boardListenerUnsubscribe) boardListenerUnsubscribe();
+            if (allActionsListenerUnsubscribe) allActionsListenerUnsubscribe();
+            cardsListenerUnsubscribe = null;
+            boardListenerUnsubscribe = null;
+            allActionsListenerUnsubscribe = null;
 
             const hash = window.location.hash;
             if (hash.startsWith('#board-')) {
                 currentBoardId = hash.substring(7);
                 showPage('board');
                 if (currentUser) loadBoard(currentBoardId);
+            } else if (hash === '#all-actions') {
+                showPage('all-actions');
+                if (currentUser) listenForAllActionItems();
             } else {
                 currentBoardId = null;
                 showPage('home');
@@ -167,8 +221,10 @@
         function showPage(pageName) {
             homePage.classList.remove('active');
             boardPage.classList.remove('active');
+            allActionsPage.classList.remove('active');
             if (pageName === 'home') homePage.classList.add('active');
             else if (pageName === 'board') boardPage.classList.add('active');
+            else if (pageName === 'all-actions') allActionsPage.classList.add('active');
         }
 
         // --- Authentication & Profile Management ---
@@ -182,7 +238,7 @@
                 currentUser = null;
                 currentUserProfile = null;
                 renderAuthUI();
-                handleRouting(); // Re-route to show logged-out state
+                handleRouting();
             }
         }
         
@@ -205,7 +261,6 @@
                     currentUserProfile = defaultProfile;
                 }
                 
-                // Check for admin status in the 'admins' collection and verify the 'isAdmin' field
                 currentUserProfile.isAdmin = adminSnap.exists() && adminSnap.data().isAdmin === true;
 
             } catch (error) {
@@ -215,15 +270,11 @@
         }
 
         function handleGoogleSignIn() {
-            signInWithPopup(auth, provider).catch(error => {
-                console.error("Google Sign-In Error:", error);
-            });
+            signInWithPopup(auth, provider).catch(error => console.error("Google Sign-In Error:", error));
         }
 
         function handleSignOut() {
-            signOut(auth).catch(error => {
-                console.error("Sign Out Error:", error);
-            });
+            signOut(auth).catch(error => console.error("Sign Out Error:", error));
         }
 
 
@@ -254,18 +305,30 @@
             }
             
             const date = new Date();
-            const timestamp = date.toLocaleDateString(); // e.g., "7/16/2025"
+            const timestamp = date.toLocaleDateString();
             const defaultName = `Retro Board ${timestamp}`;
             const name = newBoardNameInput.value.trim() || defaultName;
 
             try {
+                const itemsToCarryOver = await getIncompleteActionItems();
+
                 const boardsCollection = collection(db, `/artifacts/${appId}/public/data/retro_boards`);
                 const newBoardRef = await addDoc(boardsCollection, {
                     name: name,
                     createdBy: currentUserProfile.displayName,
                     creatorId: currentUser.uid,
-                    createdAt: serverTimestamp()
+                    createdAt: serverTimestamp(),
+                    cardsRevealed: false
                 });
+
+                const carryOverPromises = itemsToCarryOver.map(item => {
+                    const newItemData = { ...item, carriedFrom: item.boardName };
+                    delete newItemData.id;
+                    delete newItemData.boardName;
+                    return addDoc(collection(db, newBoardRef.path, 'items'), newItemData);
+                });
+                await Promise.all(carryOverPromises);
+
                 newBoardNameInput.value = '';
                 window.location.hash = `#board-${newBoardRef.id}`;
             } catch (error) {
@@ -273,10 +336,23 @@
             }
         }
 
+        async function getIncompleteActionItems() {
+            const boardsQuery = query(collection(db, `/artifacts/${appId}/public/data/retro_boards`));
+            const boardsSnapshot = await getDocs(boardsQuery);
+            if (boardsSnapshot.empty) return [];
+
+            const latestBoard = boardsSnapshot.docs.sort((a, b) => (b.data().createdAt?.seconds || 0) - (a.data().createdAt?.seconds || 0))[0];
+            
+            const itemsQuery = query(collection(db, latestBoard.ref.path, 'items'), where('column', '==', 'actions'), where('completed', '==', false));
+            const itemsSnapshot = await getDocs(itemsQuery);
+
+            return itemsSnapshot.docs.map(doc => ({ id: doc.id, boardName: latestBoard.data().name, ...doc.data() }));
+        }
+
         function listenForBoards() {
             if (!currentUser) return;
             const boardsCollection = collection(db, `/artifacts/${appId}/public/data/retro_boards`);
-            boardsListenerUnsubscribe = onSnapshot(query(boardsCollection), (snapshot) => {
+            boardListenerUnsubscribe = onSnapshot(query(boardsCollection), (snapshot) => {
                 if (snapshot.empty) {
                     boardsList.innerHTML = `<p class="text-gray-500">No boards yet. Create one!</p>`;
                     return;
@@ -297,7 +373,6 @@
                     `;
                     boardEl.appendChild(linkEl);
 
-                    // Show delete button if user is the creator OR if the user is an admin
                     if (currentUser && (currentUser.uid === board.creatorId || currentUserProfile?.isAdmin)) {
                         const deleteButton = document.createElement('button');
                         deleteButton.className = 'absolute top-2 right-2 p-1 text-gray-400 hover:text-red-600 rounded-full';
@@ -311,13 +386,11 @@
                     
                     boardsList.appendChild(boardEl);
                 });
-            }, (error) => {
-                console.error("Error listening for boards:", error);
-                boardsList.innerHTML = `<p class="text-red-500">Error loading boards.</p>`;
-            });
+            }, (error) => console.error("Error listening for boards:", error));
         }
 
         function promptDeleteBoard(boardId) {
+            modalText.textContent = "This will permanently delete the board and all of its cards. This action cannot be undone.";
             confirmationModal.classList.remove('hidden');
             
             const confirmHandler = () => {
@@ -325,9 +398,7 @@
                 closeModal();
             };
 
-            const cancelHandler = () => {
-                closeModal();
-            };
+            const cancelHandler = () => closeModal();
 
             const closeModal = () => {
                 confirmationModal.classList.add('hidden');
@@ -342,16 +413,11 @@
         async function deleteBoard(boardId) {
             if (!currentUser) return;
             
-            // First, delete all cards in the subcollection
             const itemsCollectionRef = collection(db, `/artifacts/${appId}/public/data/retro_boards/${boardId}/items`);
             const itemsSnapshot = await getDocs(itemsCollectionRef);
-            const deletePromises = [];
-            itemsSnapshot.forEach(itemDoc => {
-                deletePromises.push(deleteDoc(itemDoc.ref));
-            });
+            const deletePromises = itemsSnapshot.docs.map(itemDoc => deleteDoc(itemDoc.ref));
             await Promise.all(deletePromises);
 
-            // Then, delete the board itself
             const boardDocRef = doc(db, `/artifacts/${appId}/public/data/retro_boards/${boardId}`);
             await deleteDoc(boardDocRef);
         }
@@ -363,21 +429,58 @@
                  retroBoardContainer.innerHTML = '<p class="text-center col-span-full">Please sign in to view this board.</p>';
                  return;
             }
+            
             const boardDocRef = doc(db, `/artifacts/${appId}/public/data/retro_boards/${boardId}`);
+            
             try {
-                const boardDoc = await getDoc(boardDocRef);
-                if (boardDoc.exists()) {
-                    boardTitle.textContent = boardDoc.data().name;
+                const docSnap = await getDoc(boardDocRef);
+
+                if (docSnap.exists()) {
+                    currentBoardData = docSnap.data();
+                    boardTitle.textContent = currentBoardData.name;
+
                     renderColumns();
                     setupCardEventListeners();
+                    renderBoardActions();
+                    
                     listenForCards(boardId);
+                    
+                    boardListenerUnsubscribe = onSnapshot(boardDocRef, (updatedDoc) => {
+                        if (updatedDoc.exists()) {
+                            currentBoardData = updatedDoc.data();
+                            boardTitle.textContent = currentBoardData.name;
+                            renderBoardActions();
+                            renderCards(currentCardsData);
+                        }
+                    });
+
                 } else {
                     boardTitle.textContent = "Board not found";
                     retroBoardContainer.innerHTML = '';
+                    boardActionsContainer.innerHTML = '';
                 }
             } catch (error) {
                 console.error("Error loading board:", error);
+                boardTitle.textContent = "Error loading board";
             }
+        }
+
+        function renderBoardActions() {
+            boardActionsContainer.innerHTML = '';
+            if ((currentUserProfile?.isAdmin || currentUser.uid === currentBoardData?.creatorId) && !currentBoardData?.cardsRevealed) {
+                const revealButton = document.createElement('button');
+                revealButton.id = 'reveal-cards-btn';
+                revealButton.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md';
+                revealButton.textContent = 'Reveal All Cards';
+                revealButton.onclick = revealCards;
+                boardActionsContainer.appendChild(revealButton);
+            }
+        }
+
+        async function revealCards() {
+            if (!currentBoardId || !(currentUserProfile?.isAdmin || currentUser.uid === currentBoardData?.creatorId)) return;
+            const boardDocRef = doc(db, `/artifacts/${appId}/public/data/retro_boards/${currentBoardId}`);
+            await updateDoc(boardDocRef, { cardsRevealed: true });
         }
 
         function renderColumns() {
@@ -416,14 +519,19 @@
         async function addCard(boardId, columnId, text) {
             const authorName = currentUserProfile?.displayName || 'Anonymous';
             const itemsCollection = collection(db, `/artifacts/${appId}/public/data/retro_boards/${boardId}/items`);
-            await addDoc(itemsCollection, {
+            const newCard = {
                 text, 
                 column: columnId, 
                 userId: currentUser.uid, 
                 authorName: authorName, 
                 createdAt: serverTimestamp(),
-                votes: [] // Initialize votes as an empty array
-            }).catch(e => console.error(e));
+                votes: []
+            };
+            if (columnId === 'actions') {
+                newCard.completed = false;
+                newCard.actionItemId = crypto.randomUUID(); // Assign a persistent unique ID
+            }
+            await addDoc(itemsCollection, newCard).catch(e => console.error(e));
         }
 
         async function deleteCard(boardId, cardId) {
@@ -444,16 +552,33 @@
                 }
             }
         }
+        
+        async function toggleActionItemComplete(actionItemId, currentCompletedStatus) {
+            if (!actionItemId) return;
+
+            const newCompletedStatus = !currentCompletedStatus;
+            const itemsGroup = collectionGroup(db, 'items');
+            const q = query(itemsGroup, where('actionItemId', '==', actionItemId));
+            
+            try {
+                const querySnapshot = await getDocs(q);
+                const updatePromises = [];
+                querySnapshot.forEach((doc) => {
+                    updatePromises.push(updateDoc(doc.ref, { completed: newCompletedStatus }));
+                });
+                await Promise.all(updatePromises);
+            } catch (error) {
+                console.error("Error updating all action items:", error);
+            }
+        }
 
         function listenForCards(boardId) {
             if (!currentUser) return;
             const itemsCollection = collection(db, `/artifacts/${appId}/public/data/retro_boards/${boardId}/items`);
             cardsListenerUnsubscribe = onSnapshot(query(itemsCollection), (snapshot) => {
-                const cards = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                renderCards(cards);
-            }, (error) => {
-                console.error("Error listening for cards:", error);
-            });
+                currentCardsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderCards(currentCardsData);
+            }, (error) => console.error("Error listening for cards:", error));
         }
 
         function renderCards(cardsData) {
@@ -465,9 +590,7 @@
             const sortedData = cardsData.sort((a, b) => {
                 const voteA = a.votes?.length || 0;
                 const voteB = b.votes?.length || 0;
-                if (voteB !== voteA) {
-                    return voteB - voteA;
-                }
+                if (voteB !== voteA) return voteB - voteA;
                 return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0);
             });
 
@@ -475,28 +598,35 @@
                 const listEl = document.getElementById(`list-${card.column}`);
                 if (listEl) {
                     const cardEl = document.createElement('div');
-                    cardEl.className = 'card bg-white p-3 rounded-md shadow-sm relative';
+                    cardEl.className = `card bg-white p-3 rounded-md shadow-sm relative ${card.completed ? 'completed opacity-60' : ''}`;
                     
                     const votes = card.votes || [];
                     const userHasVoted = currentUser && votes.includes(currentUser.uid);
+                    
+                    const isRevealed = currentBoardData?.cardsRevealed === true;
+                    const isAuthor = currentUser && currentUser.uid === card.userId;
+                    const isBlurred = !isRevealed && !isAuthor;
 
                     cardEl.innerHTML = `
-                        <p class="text-gray-800 break-words pr-8">${card.text}</p>
+                        <p class="text-gray-800 break-words pr-8 ${isBlurred ? 'card-text-blurred' : ''}">${card.text}</p>
+                        ${card.carriedFrom ? `<p class="text-xs text-gray-400 mt-1">Carried from: ${card.carriedFrom}</p>` : ''}
                         <div class="flex justify-between items-center mt-2">
-                            <p class="text-xs text-gray-500">by ${card.authorName || 'Anonymous'}</p>
+                            <p class="text-xs text-gray-500">by ${isBlurred ? '???' : (isAuthor ? card.authorName : 'Another User')}</p>
                             <div class="flex items-center space-x-2">
                                 <span class="font-bold text-sm text-gray-600">${votes.length}</span>
                                 <button class="vote-btn text-gray-400 hover:text-blue-500 ${userHasVoted ? 'voted' : ''}">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
-                                    </svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" /></svg>
                                 </button>
                             </div>
                         </div>
+                        ${card.column === 'actions' ? `<button class="complete-btn mt-2 text-xs ${card.completed ? 'text-green-600' : 'text-gray-500'} hover:underline">${card.completed ? 'Completed' : 'Mark as Complete'}</button>` : ''}
                         <button class="delete-btn absolute top-1 right-2 text-red-500 hover:text-red-700 font-bold">&times;</button>
                     `;
                     
                     cardEl.querySelector('.vote-btn').onclick = () => toggleVote(currentBoardId, card.id);
+                    if (card.column === 'actions') {
+                        cardEl.querySelector('.complete-btn').onclick = () => toggleActionItemComplete(card.actionItemId, card.completed);
+                    }
 
                     const deleteButton = cardEl.querySelector('.delete-btn');
                     if (currentUser && (currentUser.uid === card.userId || currentUserProfile?.isAdmin)) {
@@ -507,6 +637,71 @@
                     listEl.appendChild(cardEl);
                 }
             });
+        }
+
+        // --- All Action Items Page Logic ---
+        function listenForAllActionItems() {
+            if (!currentUser) return;
+            const itemsGroup = collectionGroup(db, 'items');
+            const q = query(itemsGroup, where('column', '==', 'actions'));
+
+            allActionsListenerUnsubscribe = onSnapshot(q, async (snapshot) => {
+                const itemsWithBoardNames = await Promise.all(snapshot.docs.map(async (itemDoc) => {
+                    const item = { id: itemDoc.id, ...itemDoc.data() };
+                    const boardRef = itemDoc.ref.parent.parent;
+                    item.boardId = boardRef.id;
+                    const boardSnap = await getDoc(boardRef);
+                    item.boardName = boardSnap.exists() ? boardSnap.data().name : 'Unknown Board';
+                    return item;
+                }));
+
+                // De-duplicate the action items
+                const latestActionItems = new Map();
+                for (const item of itemsWithBoardNames) {
+                    if (!latestActionItems.has(item.actionItemId) || (latestActionItems.get(item.actionItemId).createdAt.seconds < item.createdAt.seconds)) {
+                        latestActionItems.set(item.actionItemId, item);
+                    }
+                }
+                renderAllActionItems(Array.from(latestActionItems.values()));
+
+            });
+        }
+
+        function renderAllActionItems(items) {
+            incompleteActionsList.innerHTML = '';
+            completedActionsList.innerHTML = '';
+
+            const incompleteItems = items.filter(item => !item.completed);
+            const completedItems = items.filter(item => item.completed);
+
+            if (incompleteItems.length === 0) {
+                incompleteActionsList.innerHTML = '<p class="text-gray-500 text-center">No active action items found.</p>';
+            } else {
+                const sortedIncomplete = incompleteItems.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                sortedIncomplete.forEach(item => renderActionItem(item, incompleteActionsList));
+            }
+
+            if (completedItems.length > 0) {
+                completedActionsSection.style.display = 'block';
+                const sortedCompleted = completedItems.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                sortedCompleted.forEach(item => renderActionItem(item, completedActionsList));
+            } else {
+                completedActionsSection.style.display = 'none';
+            }
+        }
+
+        function renderActionItem(item, container) {
+            const itemEl = document.createElement('div');
+            itemEl.className = `p-4 rounded-lg border ${item.completed ? 'bg-gray-100 opacity-70' : 'bg-white'}`;
+            itemEl.innerHTML = `
+                <p class="text-lg ${item.completed ? 'line-through text-gray-500' : 'text-gray-800'}">${item.text}</p>
+                <div class="flex justify-between items-center mt-2 text-sm">
+                    <p class="text-gray-500">From: <a href="#board-${item.boardId}" class="text-blue-600 hover:underline">${item.boardName}</a></p>
+                    <button class="all-actions-complete-btn text-xs ${item.completed ? 'text-green-600' : 'text-gray-500'} hover:underline">${item.completed ? 'Completed' : 'Mark as Complete'}</button>
+                </div>
+            `;
+            itemEl.querySelector('.all-actions-complete-btn').onclick = () => toggleActionItemComplete(item.actionItemId, item.completed);
+            container.appendChild(itemEl);
         }
 
         // --- Main Application Entry Point ---
@@ -526,10 +721,14 @@
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
-                provider = new GoogleAuthProvider(); // Initialize the Google Auth provider
+                provider = new GoogleAuthProvider();
 
                 window.addEventListener('hashchange', handleRouting);
                 createBoardBtn.addEventListener('click', createNewBoard);
+                toggleCompletedBtn.addEventListener('click', () => {
+                    completedActionsList.classList.toggle('hidden');
+                    completedArrow.classList.toggle('rotate-180');
+                });
                 onAuthStateChanged(auth, handleAuthChanges);
 
             } catch (error) {
