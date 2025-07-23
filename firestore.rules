@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if the current user is an admin.
+    // It checks for a document in the 'admins' collection with the user's ID
+    // and ensures the 'isAdmin' field is true.
+    function isAdmin() {
+      let adminDoc = get(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && adminDoc.data.isAdmin == true;
+    }
+
+    // Helper function to check if the user has the correct email domain
+    function isArryvedUser() {
+      return request.auth != null && request.auth.token.email.matches('.*@arryved\\.com$');
+    }
+
+    // Rule for user profiles
+    match /artifacts/{appId}/users/{userId}/profile/data {
+      // Allow Arryved users to manage their own profile. Admins can manage any profile.
+      allow read, write: if (isArryvedUser() && request.auth.uid == userId) || isAdmin();
+    }
+
+    // Rules for retro boards
+    match /artifacts/{appId}/public/data/retro_boards/{boardId} {
+      // Allow Arryved users to read and create boards. Admins can do anything.
+      allow read, create: if isArryvedUser() || isAdmin();
+      
+      // Allow a user to update their own board. Admins can update any board.
+      allow update: if (isArryvedUser() && resource.data.creatorId == request.auth.uid) || isAdmin();
+
+      // Allow a user to delete their own board. Admins can delete any board.
+      allow delete: if (isArryvedUser() && resource.data.creatorId == request.auth.uid) || isAdmin();
+    }
+
+    // This rule is required for the "All Action Items" page to work correctly (for the query).
+    match /{path=**}/items/{itemId} {
+        // Allow read if the user is an Arryved user OR an admin.
+        allow read: if isArryvedUser() || isAdmin();
+    }
+
+    // Rules for items (cards) within a specific board (more specific than the group rule)
+    match /artifacts/{appId}/public/data/retro_boards/{boardId}/items/{itemId} {
+      // Create is only allowed on a specific board path.
+      allow create: if isArryvedUser() || isAdmin();
+      // Update is needed for voting AND for the "Mark as Complete" button.
+      allow update: if isArryvedUser() || isAdmin();
+      // Allow a user to delete their own card, or an admin to delete any card.
+      allow delete: if (isArryvedUser() && resource.data.userId == request.auth.uid) || isAdmin();
+    }
+    
+    // Users need to be able to check their own admin status
+    match /admins/{userId} {
+        allow read: if request.auth.uid == userId;
+    }
+  }
+}
