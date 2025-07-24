@@ -84,7 +84,7 @@
 
     <div class="container mx-auto p-4 md:p-8">
         <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-900">Agile Retrospectives</h1>
+            <h1 class="text-4xl font-bold text-gray-900">Agile Retrospective App</h1>
             <div class="mt-2">
                 <a href="#" id="home-link" class="text-blue-600 hover:underline mx-2">Home</a>
                 <a href="#all-actions" id="all-actions-link" class="text-blue-600 hover:underline mx-2">All Action Items</a>
@@ -467,20 +467,24 @@
 
         function renderBoardActions() {
             boardActionsContainer.innerHTML = '';
-            if ((currentUserProfile?.isAdmin || currentUser.uid === currentBoardData?.creatorId) && !currentBoardData?.cardsRevealed) {
+            if (currentUserProfile?.isAdmin || currentUser.uid === currentBoardData?.creatorId) {
+                const isRevealed = currentBoardData?.cardsRevealed;
                 const revealButton = document.createElement('button');
                 revealButton.id = 'reveal-cards-btn';
-                revealButton.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md';
-                revealButton.textContent = 'Reveal All Cards';
-                revealButton.onclick = revealCards;
+                revealButton.className = isRevealed 
+                    ? 'bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md' 
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md';
+                revealButton.textContent = isRevealed ? 'Hide All Cards' : 'Reveal All Cards';
+                revealButton.onclick = toggleRevealCards;
                 boardActionsContainer.appendChild(revealButton);
             }
         }
 
-        async function revealCards() {
+        async function toggleRevealCards() {
             if (!currentBoardId || !(currentUserProfile?.isAdmin || currentUser.uid === currentBoardData?.creatorId)) return;
             const boardDocRef = doc(db, `/artifacts/${appId}/public/data/retro_boards/${currentBoardId}`);
-            await updateDoc(boardDocRef, { cardsRevealed: true });
+            const newRevealedState = !currentBoardData.cardsRevealed;
+            await updateDoc(boardDocRef, { cardsRevealed: newRevealedState });
         }
 
         function renderColumns() {
